@@ -2,14 +2,14 @@ use std::f64;
 use std::fmt;
 use std::ops::{Add, Div, Mul, Sub};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 enum Op {
     Add,
     Mul,
     Tanh,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct Value {
     data: f64,
     _prev: Option<(Box<Value>, Box<Value>)>,
@@ -39,8 +39,7 @@ impl Value {
     }
 
     fn tanh(self) -> Self {
-        let x = self.data;
-        let t = (f64::exp(2.0 * x) - 1.0) / (f64::exp(2.0 * x) + 1.0);
+        let t = self.data.tanh();
         Self::new_ext(
             t,
             Some((Box::new(self), Box::new(DUMMY_VALUE))),
@@ -61,14 +60,37 @@ impl Value {
                 Some(Op::Mul) => {
                     a.grad += b.data * self.grad;
                     b.grad += a.data * self.grad;
+                    println!("a.grad: {}, b.grad: {}", a.grad, b.grad);
                 }
                 Some(Op::Tanh) => {
-                    let t = (f64::exp(2.0 * a.data) - 1.0) / (f64::exp(2.0 * a.data) + 1.0);
+                    let t = a.data.tanh();
                     a.grad = (1.0 - t.powf(2.0)) * self.grad;
                     println!("a.grad: {}", a.grad);
                 }
                 None => {}
             }
+        }
+    }
+
+    fn backward(&mut self) {
+        let mut topo: Vec<Value> = vec![];
+        let mut visited: Vec<Value> = vec![];
+        fn build_topo(v: &Value, topo: &mut Vec<Value>, visited: &mut Vec<Value>) {
+            if !visited.contains(&v) {
+                visited.push(v.clone());
+                if let Some(ref _prev) = v._prev {
+                    build_topo(_prev.0.as_ref(), topo, visited);
+                    build_topo(_prev.1.as_ref(), topo, visited);
+                }
+                topo.push(v.clone());
+            }
+        }
+        build_topo(&self, &mut topo, &mut visited);
+
+        self.grad = 1.0;
+        topo.reverse();
+        for mut node in topo {
+            node._backward();
         }
     }
 }
@@ -146,13 +168,14 @@ fn main() {
     let x1w1x2w2 = x1w1 + x2w2;
     println!("x1w1x2w2: {}", x1w1x2w2);
 
-    let mut n = x1w1x2w2 + b;
+    let n = x1w1x2w2 + b;
     println!("n: {}", n);
 
     let mut o = n.tanh();
     println!("o: {}", o);
 
     o.grad = 1.0;
-    o._backward();
-    n._backward();
+    o.backward();
+    // n._backward();
+    // b._backward();
 }
