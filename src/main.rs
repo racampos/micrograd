@@ -2,12 +2,17 @@ use std::cell::RefCell;
 use std::f64;
 use std::fmt;
 use std::rc::Rc;
+use std::vec;
+use rand::Rng;
+use rand::distributions::Uniform;
 
 #[derive(Debug, Clone, PartialEq)]
 enum Op {
     Add,
     Mul,
     Tanh,
+    Exp,
+    Pow
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -66,8 +71,11 @@ impl Value {
     }
 
     fn tanh(self) -> Self {
-        let t = self.get_data().tanh();
-        Self::new_ext(t, Some((self.clone(), self.clone())), Some(Op::Tanh))
+        Self::new_ext(self.get_data().tanh(), Some((self.clone(), self.clone())), Some(Op::Tanh))
+    }
+
+    fn exp(self) -> Self {
+        Self::new_ext(self.get_data().exp(), Some((self.clone(), self.clone())), Some(Op::Exp))
     }
 
     fn add(self, other: Self) -> Self {
@@ -86,20 +94,20 @@ impl Value {
         )
     }
 
+    fn neg(self) -> Self {
+        self.mul(Value::new(-1.0))
+    }
+
     fn sub(self, other: Self) -> Self {
-        Self::new_ext(
-            self.get_data() - other.get_data(),
-            Some((self.clone(), other.clone())),
-            Some(Op::Add),
-        )
+        self.add(other.neg())
+    }
+
+    fn pow(self, other: Self) -> Self {
+        Self::new_ext(self.get_data().powf(other.get_data()), Some((self.clone(), other.clone())), Some(Op::Pow))
     }
 
     fn div(self, other: Self) -> Self {
-        Self::new_ext(
-            self.get_data() / other.get_data(),
-            Some((self.clone(), other.clone())),
-            Some(Op::Mul),
-        )
+        self.mul(other.pow(Value::new(-1.0)))
     }
 
     fn _backward(self) {
@@ -120,6 +128,14 @@ impl Value {
                 Some(Op::Tanh) => {
                     let t = a.get_data().tanh();
                     a.update_grad((1.0 - t.powf(2.0)) * self.get_grad());
+                    // println!("a.grad: {}", a.get_grad());
+                }
+                Some(Op::Exp) => {
+                    a.update_grad(a.get_data().exp() * self.get_grad());
+                    // println!("a.grad: {}", a.get_grad());
+                }
+                Some(Op::Pow) => {
+                    a.update_grad(b.get_data() * a.get_data().powf(b.get_data()-1.0) * self.get_grad());
                     // println!("a.grad: {}", a.get_grad());
                 }
                 None => {}
@@ -160,6 +176,82 @@ impl fmt::Display for Value {
     }
 }
 
+
+
+struct Neuron {
+    w: Vec<Value>,
+    b: Value,
+}
+
+impl Neuron {
+    fn new(nin: u16) -> Self {
+        let mut rng = rand::thread_rng();
+        let range = Uniform::new(-1.0, 1.0);
+
+        let w: Vec<Value> = (0..nin)
+            .map(|_| Value::new(rng.sample(&range)))
+            .collect();
+
+        let b = Value::new(rng.sample(&range));
+
+        Neuron { w, b }
+    }
+
+    pub fn call(&self, inputs: Vec<Value>) -> Value {
+        assert_eq!(self.w.len(), inputs.len(), "Input size must match number of weights.");
+        // let inputs: Vec<Value> = inputs.iter()
+        //     .map(|&x| Value::new(x))
+        //     .collect();
+        let wx = self.w.iter().zip(inputs.iter())
+            .map(|(weight, &ref input)| weight.clone().mul(input.clone()));
+
+        let act = wx.into_iter().fold(Value::new(0.0), |acc, x| acc.add(x)).add(self.b.clone());
+        act.tanh()
+    }
+}
+
+struct Layer {
+    neurons: Vec<Neuron>,
+}
+
+impl Layer {
+    fn new(nin: u16, nout: u16) -> Self {
+        let neurons: Vec<Neuron> = (0..nout)
+            .map(|_| Neuron::new(nin))
+            .collect();
+        Layer { neurons }
+    }
+
+    pub fn call(&self, inputs: Vec<Value>) -> Vec<Value> {
+        self.neurons.iter()
+            .map(|neuron| neuron.call(inputs.clone()))
+            .collect()
+    }
+}
+
+struct MLP {
+    layers: Vec<Layer>,
+}
+
+impl MLP {
+    fn new(nin: u16, nouts: Vec<u16>) -> Self {
+        let sz = vec![vec![nin], nouts].concat();
+        let layers: Vec<Layer> = sz.windows(2)
+            .map(|w| Layer::new(w[0], w[1]))
+            .collect();
+        MLP { layers }
+    }
+
+    pub fn call(&self, inputs: &[f64]) -> Value {
+        let inputs: Vec<Value> = inputs.iter()
+            .map(|&x| Value::new(x))
+            .collect();
+        let out = self.layers.iter()
+            .fold(inputs.to_vec(), |acc, layer| layer.call(acc));
+        out[0].clone()
+    }
+}
+
 fn main() {
     let x1 = Value::new(2.0);
     let x2 = Value::new(0.0);
@@ -195,4 +287,39 @@ fn main() {
     println!("w2.grad: {}", w2.get_grad());
     println!("x1.grad: {}", x1.get_grad());
     println!("x2.grad: {}", x2.get_grad());
+
+    let a = Value::new(2.0);
+    let b = Value::new(4.0);
+    let c = a.clone().sub(b.clone());
+    println!("c: {}", c);
+
+    let x = [2.0, 3.0, -1.0];
+    let n = MLP::new(3, [4, 4, 1].to_vec());
+    println!("n: {}", n.call(&x));
+
+    let xs = [
+        [2.0, 3.0, -1.0],
+        [3.0, -1.0, 5.0],
+        [0.5, 1.0, 1.0],
+        [1.0, 1.0, -1.0],
+    ];
+    let ys = [1.0, -1.0, -1.0, 1.0];
+    let ypred: Vec<Value> = xs.iter()
+                .map(|row| n.call(row))
+                .collect();
+
+    let squared_differences: Vec<Value> = ys.iter()
+        .zip(ypred.iter())
+        .map(|(&ygt, &ref yout)| (yout.clone().sub(Value::new(ygt))).pow(Value::new(2.0)))
+        .collect();
+
+    let loss = squared_differences.iter()
+        .fold(Value::new(0.0), |acc, x| acc.add(x.clone()));
+
+    for value in &ypred {
+        println!("{}", value);
+    }
+
+    println!("loss: {}", loss);
+
 }
