@@ -347,7 +347,8 @@ fn main() {
         println!("{}", y.get_data());
     }
     println!("\nTraining...");
-    for k in 0..20 {
+    for _k in 0..100 {
+        // Forward pass
         let ypred: Vec<Value> = xs.iter().map(|row| n.call(row)).collect();
         let squared_differences: Vec<Value> = ys
             .iter()
@@ -357,12 +358,19 @@ fn main() {
         let loss = squared_differences
             .iter()
             .fold(Value::new(0.0), |acc, x| acc.add(x.clone()));
-        println!("loss: {}", loss);
 
-        // *****************************************************
-        loss.clone().backward();
+        // Print loss
+        println!("loss: {}", loss.get_data());
+
+        // Backward pass
         for p in n.parameters() {
-            p.update_data(p.get_data() - 0.01 * p.get_grad());
+            p.update_grad(0.0);
+        }
+        loss.clone().backward();
+
+        // Update parameters
+        for p in n.parameters() {
+            p.update_data(p.get_data() - 0.1 * p.get_grad());
         }
     }
     let ypred: Vec<Value> = xs.iter().map(|row| n.call(row)).collect();
