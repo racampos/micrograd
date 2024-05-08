@@ -1,10 +1,11 @@
+use rand::distributions::Uniform;
+use rand::Rng;
 use std::cell::RefCell;
+use std::collections::btree_map::Range;
 use std::f64;
 use std::fmt;
 use std::rc::Rc;
 use std::vec;
-use rand::Rng;
-use rand::distributions::Uniform;
 
 #[derive(Debug, Clone, PartialEq)]
 enum Op {
@@ -12,7 +13,7 @@ enum Op {
     Mul,
     Tanh,
     Exp,
-    Pow
+    Pow,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -71,11 +72,19 @@ impl Value {
     }
 
     fn tanh(self) -> Self {
-        Self::new_ext(self.get_data().tanh(), Some((self.clone(), self.clone())), Some(Op::Tanh))
+        Self::new_ext(
+            self.get_data().tanh(),
+            Some((self.clone(), self.clone())),
+            Some(Op::Tanh),
+        )
     }
 
     fn exp(self) -> Self {
-        Self::new_ext(self.get_data().exp(), Some((self.clone(), self.clone())), Some(Op::Exp))
+        Self::new_ext(
+            self.get_data().exp(),
+            Some((self.clone(), self.clone())),
+            Some(Op::Exp),
+        )
     }
 
     fn add(self, other: Self) -> Self {
@@ -103,7 +112,11 @@ impl Value {
     }
 
     fn pow(self, other: Self) -> Self {
-        Self::new_ext(self.get_data().powf(other.get_data()), Some((self.clone(), other.clone())), Some(Op::Pow))
+        Self::new_ext(
+            self.get_data().powf(other.get_data()),
+            Some((self.clone(), other.clone())),
+            Some(Op::Pow),
+        )
     }
 
     fn div(self, other: Self) -> Self {
@@ -135,7 +148,9 @@ impl Value {
                     // println!("a.grad: {}", a.get_grad());
                 }
                 Some(Op::Pow) => {
-                    a.update_grad(b.get_data() * a.get_data().powf(b.get_data()-1.0) * self.get_grad());
+                    a.update_grad(
+                        b.get_data() * a.get_data().powf(b.get_data() - 1.0) * self.get_grad(),
+                    );
                     // println!("a.grad: {}", a.get_grad());
                 }
                 None => {}
@@ -176,8 +191,6 @@ impl fmt::Display for Value {
     }
 }
 
-
-
 struct Neuron {
     w: Vec<Value>,
     b: Value,
@@ -188,9 +201,7 @@ impl Neuron {
         let mut rng = rand::thread_rng();
         let range = Uniform::new(-1.0, 1.0);
 
-        let w: Vec<Value> = (0..nin)
-            .map(|_| Value::new(rng.sample(&range)))
-            .collect();
+        let w: Vec<Value> = (0..nin).map(|_| Value::new(rng.sample(&range))).collect();
 
         let b = Value::new(rng.sample(&range));
 
@@ -198,15 +209,31 @@ impl Neuron {
     }
 
     pub fn call(&self, inputs: Vec<Value>) -> Value {
-        assert_eq!(self.w.len(), inputs.len(), "Input size must match number of weights.");
+        assert_eq!(
+            self.w.len(),
+            inputs.len(),
+            "Input size must match number of weights."
+        );
         // let inputs: Vec<Value> = inputs.iter()
         //     .map(|&x| Value::new(x))
         //     .collect();
-        let wx = self.w.iter().zip(inputs.iter())
+        let wx = self
+            .w
+            .iter()
+            .zip(inputs.iter())
             .map(|(weight, &ref input)| weight.clone().mul(input.clone()));
 
-        let act = wx.into_iter().fold(Value::new(0.0), |acc, x| acc.add(x)).add(self.b.clone());
+        let act = wx
+            .into_iter()
+            .fold(Value::new(0.0), |acc, x| acc.add(x))
+            .add(self.b.clone());
         act.tanh()
+    }
+
+    fn parameters(&self) -> Vec<Value> {
+        let mut params: Vec<Value> = self.w.clone();
+        params.push(self.b.clone());
+        params
     }
 }
 
@@ -216,15 +243,22 @@ struct Layer {
 
 impl Layer {
     fn new(nin: u16, nout: u16) -> Self {
-        let neurons: Vec<Neuron> = (0..nout)
-            .map(|_| Neuron::new(nin))
-            .collect();
+        let neurons: Vec<Neuron> = (0..nout).map(|_| Neuron::new(nin)).collect();
         Layer { neurons }
     }
 
     pub fn call(&self, inputs: Vec<Value>) -> Vec<Value> {
-        self.neurons.iter()
+        self.neurons
+            .iter()
             .map(|neuron| neuron.call(inputs.clone()))
+            .collect()
+    }
+
+    fn parameters(&self) -> Vec<Value> {
+        self.neurons
+            .iter()
+            .map(|neuron| neuron.parameters())
+            .flatten()
             .collect()
     }
 }
@@ -236,19 +270,25 @@ struct MLP {
 impl MLP {
     fn new(nin: u16, nouts: Vec<u16>) -> Self {
         let sz = vec![vec![nin], nouts].concat();
-        let layers: Vec<Layer> = sz.windows(2)
-            .map(|w| Layer::new(w[0], w[1]))
-            .collect();
+        let layers: Vec<Layer> = sz.windows(2).map(|w| Layer::new(w[0], w[1])).collect();
         MLP { layers }
     }
 
     pub fn call(&self, inputs: &[f64]) -> Value {
-        let inputs: Vec<Value> = inputs.iter()
-            .map(|&x| Value::new(x))
-            .collect();
-        let out = self.layers.iter()
+        let inputs: Vec<Value> = inputs.iter().map(|&x| Value::new(x)).collect();
+        let out = self
+            .layers
+            .iter()
             .fold(inputs.to_vec(), |acc, layer| layer.call(acc));
         out[0].clone()
+    }
+
+    fn parameters(&self) -> Vec<Value> {
+        self.layers
+            .iter()
+            .map(|layer| layer.parameters())
+            .flatten()
+            .collect()
     }
 }
 
@@ -273,29 +313,25 @@ fn main() {
 
     // o.update_grad(1.0);
     // o._backward();
-    println!("n.grad: {}", n.get_grad());
+    // println!("n.grad: {}", n.get_grad());
     // n._backward();
-    println!("x1w1x2w2.grad: {}", x1w1x2w2.get_grad());
-    println!("b.grad: {}", b.get_grad());
+    // println!("x1w1x2w2.grad: {}", x1w1x2w2.get_grad());
+    // println!("b.grad: {}", b.get_grad());
     // b._backward();
     // x1w1x2w2._backward();
-    println!("w1x1.grad: {}", x1w1.get_grad());
-    println!("w2x2.grad: {}", x2w2.get_grad());
+    // println!("w1x1.grad: {}", x1w1.get_grad());
+    // println!("w2x2.grad: {}", x2w2.get_grad());
     // x2w2._backward();
     // x1w1._backward();
-    println!("w1.grad: {}", w1.get_grad());
-    println!("w2.grad: {}", w2.get_grad());
-    println!("x1.grad: {}", x1.get_grad());
-    println!("x2.grad: {}", x2.get_grad());
+    // println!("w1.grad: {}", w1.get_grad());
+    // println!("w2.grad: {}", w2.get_grad());
+    // println!("x1.grad: {}", x1.get_grad());
+    // println!("x2.grad: {}", x2.get_grad());
 
-    let a = Value::new(2.0);
-    let b = Value::new(4.0);
-    let c = a.clone().sub(b.clone());
-    println!("c: {}", c);
+    // MLP Training
 
     let x = [2.0, 3.0, -1.0];
     let n = MLP::new(3, [4, 4, 1].to_vec());
-    println!("n: {}", n.call(&x));
 
     let xs = [
         [2.0, 3.0, -1.0],
@@ -304,22 +340,34 @@ fn main() {
         [1.0, 1.0, -1.0],
     ];
     let ys = [1.0, -1.0, -1.0, 1.0];
-    let ypred: Vec<Value> = xs.iter()
-                .map(|row| n.call(row))
-                .collect();
 
-    let squared_differences: Vec<Value> = ys.iter()
-        .zip(ypred.iter())
-        .map(|(&ygt, &ref yout)| (yout.clone().sub(Value::new(ygt))).pow(Value::new(2.0)))
-        .collect();
-
-    let loss = squared_differences.iter()
-        .fold(Value::new(0.0), |acc, x| acc.add(x.clone()));
-
-    for value in &ypred {
-        println!("{}", value);
+    let ypred: Vec<Value> = xs.iter().map(|row| n.call(row)).collect();
+    println!("\nypred before training:\n");
+    for y in ypred {
+        println!("{}", y.get_data());
     }
+    println!("\nTraining...");
+    for k in 0..20 {
+        let ypred: Vec<Value> = xs.iter().map(|row| n.call(row)).collect();
+        let squared_differences: Vec<Value> = ys
+            .iter()
+            .zip(ypred.iter())
+            .map(|(&ygt, &ref yout)| (yout.clone().sub(Value::new(ygt))).pow(Value::new(2.0)))
+            .collect();
+        let loss = squared_differences
+            .iter()
+            .fold(Value::new(0.0), |acc, x| acc.add(x.clone()));
+        println!("loss: {}", loss);
 
-    println!("loss: {}", loss);
-
+        // *****************************************************
+        loss.clone().backward();
+        for p in n.parameters() {
+            p.update_data(p.get_data() - 0.01 * p.get_grad());
+        }
+    }
+    let ypred: Vec<Value> = xs.iter().map(|row| n.call(row)).collect();
+    println!("\nypred after training:\n");
+    for y in ypred {
+        println!("{}", y.get_data());
+    }
 }
