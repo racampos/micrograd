@@ -1,7 +1,6 @@
 use rand::distributions::Uniform;
 use rand::Rng;
 use std::cell::RefCell;
-use std::collections::btree_map::Range;
 use std::f64;
 use std::fmt;
 use std::rc::Rc;
@@ -39,10 +38,6 @@ impl Value {
             _op,
             grad: 0.0,
         })))
-    }
-
-    pub fn clone_inner(&self) -> Rc<RefCell<_Value>> {
-        Rc::clone(&self.0)
     }
 
     pub fn update_data(&self, new_data: f64) {
@@ -214,9 +209,7 @@ impl Neuron {
             inputs.len(),
             "Input size must match number of weights."
         );
-        // let inputs: Vec<Value> = inputs.iter()
-        //     .map(|&x| Value::new(x))
-        //     .collect();
+
         let wx = self
             .w
             .iter()
@@ -330,7 +323,6 @@ fn main() {
 
     // MLP Training
 
-    let x = [2.0, 3.0, -1.0];
     let n = MLP::new(3, [4, 4, 1].to_vec());
 
     let xs = [
@@ -347,7 +339,7 @@ fn main() {
         println!("{}", y.get_data());
     }
     println!("\nTraining...");
-    for _k in 0..100 {
+    for _k in 0..1000 {
         // Forward pass
         let ypred: Vec<Value> = xs.iter().map(|row| n.call(row)).collect();
         let squared_differences: Vec<Value> = ys
